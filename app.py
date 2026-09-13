@@ -179,10 +179,15 @@ def chat():
     chat_id = data.get("chat_id")
     message = data.get("message", "").strip()
 
-    if not chat_id or chat_id not in chats[user_id]:
-        return jsonify({
-            "reply": "ไม่พบห้องแชตครับ"
-        }), 400
+if not chat_id or chat_id not in chats[user_id]:
+    chat_id = str(uuid.uuid4())
+
+    chats[user_id][chat_id] = {
+        "title": "แชตใหม่",
+        "messages": []
+    }
+
+    save_chats(chats)
 
     if not message:
         return jsonify({
