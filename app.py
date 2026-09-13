@@ -1,23 +1,4 @@
-from flask import Flask, request, jsonify, render_template
-from google import genai
-from dotenv import load_dotenv
-import os
-
-from flask import Flask, request, jsonify, render_template
-from google import genai
-from dotenv import load_dotenv
-import os
-import json
-
-load_dotenv()
-
-app = Flask(__name__)
-
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
-
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, make_response
 from google import genai
 from dotenv import load_dotenv
 import os
@@ -46,83 +27,149 @@ def load_chats():
         return {}
 
 
-def save_chats():
+def save_chats(chats):
     with open(CHAT_FILE, "w", encoding="utf-8") as f:
         json.dump(chats, f, ensure_ascii=False, indent=2)
 
 
-chats = load_chats()
+def get_user_id():
+    return request.cookies.get("user_id")
 
 
-# ถ้ายังไม่มีห้อง ให้สร้างห้องแรก
-if not chats:
-    chat_id = str(uuid.uuid4())
+def create_user_id():
+    return str(uuid.uuid4())
 
-    chats[chat_id] = {
-        "title": "แชตใหม่",
-        "messages": []
-    }
 
-    save_chats()
+def get_user_chats(user_id):
+    chats = load_chats()
+
+    if user_id not in chats:
+        chats[user_id] = {}
+
+        chat_id = str(uuid.uuid4())
+        chats[user_id][chat_id] = {
+            "title": "แชตใหม่",
+            "messages": []
+        }
+
+        save_chats(chats)
+
+    return chats
 
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    user_id = get_user_id()
+
+    if not user_id:
+        user_id = create_user_id()
+
+    response = make_response(
+        render_template("index.html")
+    )
+
+    response.set_cookie(
+        "user_id",
+        user_id,
+        max_age=60 * 60 * 24 * 365
+    )
+
+    return response
 
 
-# ส่งรายชื่อห้องแชต
 @app.route("/chats", methods=["GET"])
 def get_chats():
+    user_id = get_user_id()
+
+    if not user_id:
+        user_id = create_user_id()
+
+    chats = get_user_chats(user_id)
+    user_chats = chats[user_id]
+
     result = []
 
-    for chat_id, chat in chats.items():
+    for chat_id, chat in user_chats.items():
         result.append({
             "id": chat_id,
             "title": chat["title"]
         })
 
-    return jsonify(result)
+    response = make_response(jsonify(result))
+
+    response.set_cookie(
+        "user_id",
+        user_id,
+        max_age=60 * 60 * 24 * 365
+    )
+
+    return response
 
 
-# สร้างห้องใหม่
 @app.route("/new-chat", methods=["POST"])
 def new_chat():
+    user_id = get_user_id()
+
+    if not user_id:
+        user_id = create_user_id()
+
+    chats = get_user_chats(user_id)
+
     chat_id = str(uuid.uuid4())
 
-    chats[chat_id] = {
+    chats[user_id][chat_id] = {
         "title": "แชตใหม่",
         "messages": []
     }
 
-    save_chats()
+    save_chats(chats)
 
-    return jsonify({
+    response = make_response(jsonify({
         "id": chat_id,
         "title": "แชตใหม่"
-    })
+    }))
+
+    response.set_cookie(
+        "user_id",
+        user_id,
+        max_age=60 * 60 * 24 * 365
+    )
+
+    return response
 
 
-# โหลดข้อความของห้อง
 @app.route("/chat/<chat_id>", methods=["GET"])
 def get_chat(chat_id):
-    if chat_id not in chats:
+    user_id = get_user_id()
+
+    if not user_id:
+        return jsonify({"messages": []})
+
+    chats = get_user_chats(user_id)
+
+    if chat_id not in chats[user_id]:
         return jsonify({"messages": []})
 
     return jsonify({
-        "messages": chats[chat_id]["messages"]
+        "messages": chats[user_id][chat_id]["messages"]
     })
 
 
-# ส่งข้อความ
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
 
+    user_id = get_user_id()
+
+    if not user_id:
+        user_id = create_user_id()
+
+    chats = get_user_chats(user_id)
+
     chat_id = data.get("chat_id")
     message = data.get("message", "").strip()
 
-    if not chat_id or chat_id not in chats:
+    if not chat_id or chat_id not in chats[user_id]:
         return jsonify({
             "reply": "ไม่พบห้องแชตครับ"
         }), 400
@@ -132,19 +179,16 @@ def chat():
             "reply": "พิมพ์ข้อความมาก่อนนะครับ 😄"
         })
 
-    current_chat = chats[chat_id]
+    current_chat = chats[user_id][chat_id]
 
-    # บันทึกข้อความผู้ใช้
     current_chat["messages"].append({
         "role": "user",
         "text": message
     })
 
-    # ตั้งชื่อห้องจากข้อความแรก
     if current_chat["title"] == "แชตใหม่":
         current_chat["title"] = message[:30]
 
-    # สร้างประวัติสำหรับ Gemini
     conversation = ""
 
     for item in current_chat["messages"]:
@@ -176,21 +220,27 @@ def chat():
 
         reply = response.text
 
-        # บันทึกคำตอบ AI
         current_chat["messages"].append({
             "role": "assistant",
             "text": reply
         })
 
-        save_chats()
+        save_chats(chats)
 
-        return jsonify({
+        result = jsonify({
             "reply": reply
         })
 
+        result.set_cookie(
+            "user_id",
+            user_id,
+            max_age=60 * 60 * 24 * 365
+        )
+
+        return result
+
     except Exception as e:
 
-        # ถ้าเกิด Error เอาข้อความล่าสุดออก
         if current_chat["messages"]:
             current_chat["messages"].pop()
 
@@ -200,4 +250,4 @@ def chat():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
