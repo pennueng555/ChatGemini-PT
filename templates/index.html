@@ -786,7 +786,7 @@
 
             addMessage(
                 "assistant",
-                data.response || data.message || "ไม่พบคำตอบ"
+                data.reply || data.response || data.message || "ไม่พบคำตอบ"
             );
 
             await loadChats();
