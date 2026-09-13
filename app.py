@@ -22,7 +22,17 @@ def load_chats():
 
     try:
         with open(CHAT_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+
+        # ล้างข้อมูลรูปแบบเก่าที่ใช้ร่วมกัน
+        if data:
+            first = next(iter(data.values()))
+
+            if isinstance(first, dict) and "messages" in first:
+                return {}
+
+        return data
+
     except:
         return {}
 
@@ -47,6 +57,7 @@ def get_user_chats(user_id):
         chats[user_id] = {}
 
         chat_id = str(uuid.uuid4())
+
         chats[user_id][chat_id] = {
             "title": "แชตใหม่",
             "messages": []
@@ -77,7 +88,7 @@ def home():
     return response
 
 
-@app.route("/chats", methods=["GET"])
+@app.route("/chats")
 def get_chats():
     user_id = get_user_id()
 
@@ -85,11 +96,10 @@ def get_chats():
         user_id = create_user_id()
 
     chats = get_user_chats(user_id)
-    user_chats = chats[user_id]
 
     result = []
 
-    for chat_id, chat in user_chats.items():
+    for chat_id, chat in chats[user_id].items():
         result.append({
             "id": chat_id,
             "title": chat["title"]
@@ -138,7 +148,7 @@ def new_chat():
     return response
 
 
-@app.route("/chat/<chat_id>", methods=["GET"])
+@app.route("/chat/<chat_id>")
 def get_chat(chat_id):
     user_id = get_user_id()
 
@@ -157,7 +167,7 @@ def get_chat(chat_id):
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
+    data = request.get_json(silent=True) or {}
 
     user_id = get_user_id()
 
@@ -200,11 +210,9 @@ def chat():
     prompt = f"""
 คุณคือ ChatGemini PT ผู้ช่วย AI ที่เป็นมิตร
 
-นี่คือประวัติของห้องแชตนี้:
-
+ประวัติการสนทนา:
 {conversation}
 
-ใช้ประวัติด้านบนเพื่อเข้าใจบริบทของการสนทนา
 ตอบข้อความล่าสุดของผู้ใช้
 ตอบเป็นภาษาไทยเป็นหลัก
 
